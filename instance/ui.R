@@ -207,15 +207,15 @@ navbarPage("Nordlab: RNA Browser", theme = shinytheme("flatly"), selected = "Plo
                                                    tabPanel("Click Options",
                                                             # tags$hr(),
                                                             tags$br(),
-                                                            tags$h4("Click Display"),
+                                                            tags$h4("Condition (Text shown)"),
                                                             selectizeInput(inputId = "label_type",
                                                                            label = NULL,
                                                                            selected = "none",
                                                                            choices = "none"),
                                                             
                                                             radioButtons(inputId = "multi_label",
-                                                                         label = NULL,
-                                                                         choices = c("only selected"="s", "all that match"="m"),
+                                                                         label = "Highlight",
+                                                                         choices = c("only clicked point"="s", "all matching point"="m"),
                                                                          selected = "s",
                                                                          inline = T),
                                                             tags$hr()
@@ -279,6 +279,7 @@ navbarPage("Nordlab: RNA Browser", theme = shinytheme("flatly"), selected = "Plo
                                                                                click on the plot tab."),
                                                                 tags$hr(),
                                                                 tags$br(),
+                                                                conditionalPanel(condition = 'output.fc_tables_yes', tags$h4("No FC tables uploaded.")),
                                                                 DT::dataTableOutput("fold_change_table")
                                                        ),
                                                        
@@ -288,6 +289,21 @@ navbarPage("Nordlab: RNA Browser", theme = shinytheme("flatly"), selected = "Plo
                                                                 tags$hr(),
                                                                 tags$br(),
                                                                 plotOutput("fc_plot", height="100%", width = "100%", click = "plot_click_4")
+                                                       ),
+                                                       
+                                                       tabPanel("Heatmap",
+                                                                tags$h3("Step 3: See the Plot Options on the left"),
+                                                                tags$h4("Press the 'Generate Heatmap' button to generate a heatmap based on the current genes present in the Fold Change, Table display."),
+                                                                tags$hr(),
+                                                                tags$br(),
+                                                                
+                                                                actionButton(inputId = "heatmap_button",
+                                                                             label = "Generate Heatmap"),
+                                                                
+                                                                tags$br(),
+                                                                tags$br(),
+                                                                
+                                                                conditionalPanel(condition = 'output.heatmap_yes', plotlyOutput("heatmap", height="800px", width="900px"))
                                                        )
                                                        
                                            ),
@@ -320,7 +336,7 @@ tabPanel("Update Log",
                             Lastly, we updated the browser to allow human and mouse gene symbols to be compatible. It is now possible to view human and mouse data together with counts for both."),
          tags$h5("We're also putting structures in place so eventually users will be able to upload their own data to analyze on their own and compare with the sets
                             we've already provided. A note about that, the browser will have a good deal of flexibility when it comes to the format of user inputted data, but several 
-                            columns will be required for the sample table. Lib_ID, Dataset, and ExperimentalDesign will all be required. Organism will be a separate input through the interface, but will also
+                            columns will be required for the sample table. Sample_ID, Dataset, and ExperimentalDesign will all be required. Organism will be a separate input through the interface, but will also
                             be required. Formatting of gene names in the counts matrix is not required, but certain formats of names will make genes compatible with ours."),
          tags$br(),
          tags$h4("V1.02 - Aug 30, 2017"),
@@ -365,6 +381,9 @@ tags$head(tags$style(HTML("
                                     
                                     #downloadData{ background-color:#f09e21; color:#f0f0f0; }
                                     #downloadData:hover{ background-color:#56B4E9; }
+
+                                    #heatmap_button{ background-color:#f09e21; color:#f0f0f0; }
+                                    #heatmap_button:hover{ background-color:#56B4E9; }
                                     
                                     .tabbable > .nav > li[class=active] > a {border-color:#ffb62f; background-color:#ffb62f; color:white }
                                     .tabbable > .nav > li > a:hover { background-color:transparent; color:#56B4E9; border-color:transparent }

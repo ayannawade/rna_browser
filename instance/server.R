@@ -4,8 +4,8 @@ function(input, output, session) {
   # REACTIVE VALUES
   ##########################################################################################################################
   
-  RV_data = reactiveValues(matrix = data.frame(),
-                           table = data.frame(),
+  RV_data = reactiveValues(counts_matrix = data.frame(),
+                           metadata = data.frame(),
                            selected_genes = data.frame(),
                            exp_min = 0,
                            exp_max = 100,
@@ -47,13 +47,17 @@ function(input, output, session) {
                               title = "Fold Change",
                               clicks = NULL)
   
+  RV_heatmap = reactiveValues(matrix = data.frame("x"=c(0,1),"y"=c(1,0)),
+                              title = "Heatmap",
+                              clicks = NULL)
+  
   RV_dynamic = reactiveValues(val = 0)
   
   reset = function() {
     # Blank current data
-    RV_data$matrix = data.frame()
-    RV_data$table = data.frame()
-    RV_data$selected_genes = data.frame("Lib_ID"=character())
+    RV_data$counts_matrix = data.frame()
+    RV_data$metadata = data.frame()
+    RV_data$selected_genes = data.frame("Sample_ID"=character())
     RV_data$exp_min = 0
     RV_data$exp_max = 100
     RV_data$DGE_matrix = data.frame()
@@ -76,6 +80,8 @@ function(input, output, session) {
     
     RV_fc_plot$plot = ggplot()
     RV_fc_plot$clicks = NULL
+    
+    RV_heatmap$matrix = data.frame("x"=c(0,1),"y"=c(1,0))
     
     RV_fc_table$selector = list()
     RV_fc_table$table_list = list()
@@ -173,6 +179,7 @@ function(input, output, session) {
         # 3
         
         if (length(input$dataset) > 0) {
+          print("PRELOADED DATA SELECTED")
           
           # 3.1 Check selected sets for human data
           selected_sets = input$dataset
@@ -230,8 +237,7 @@ function(input, output, session) {
         
         # 3.4 Save fold change reactive values
         RV_fc_table$table_list = fc_frames
-        fc_names = unlist(lapply(fc_names, function(i) unlist(strsplit(i, "[.]"))[1]))
-        RV_UI$fc_names = fc_names
+        RV_UI$fc_names = unlist(lapply(fc_names, function(i) unlist(strsplit(i, "[.]"))[1]))
         
         # 4
         incProgress(1/n, message = "Calculating MDS")
@@ -246,13 +252,13 @@ function(input, output, session) {
         fit = cmdscale(d, eig=TRUE, k=2)
         
         MDS_data = data.frame(fit$points)
-        MDS_data$Lib_ID = row.names(MDS_data)
-        MDS_data = merge(MDS_data, merged_annotations, by = "Lib_ID")
+        MDS_data$Sample_ID = row.names(MDS_data)
+        MDS_data = merge(MDS_data, merged_annotations, by = "Sample_ID")
         
         # 4.2 Set reactive values
         RV_UI$gene_names = row.names(working_matrix)
-        RV_data$matrix = working_matrix
-        RV_data$table = MDS_data
+        RV_data$counts_matrix = working_matrix
+        RV_data$metadata = MDS_data
         
         # 4.3 Set plot names for saving
         title_list = unique(MDS_data$Dataset)
@@ -269,9 +275,9 @@ function(input, output, session) {
           incProgress(1/n, message = "Calculating DGE")
           
           # 5.1 Set parameters for DGE analysis
-          annotations = RV_data$table
-          matrix = RV_data$matrix
-          cpm.Lib_ID.cutoff = 2
+          annotations = RV_data$metadata
+          matrix = RV_data$counts_matrix
+          cpm.Sample_ID.cutoff = 2
           min.cpm = 1
           
           matrix = matrix[,which(!apply(matrix,2,FUN = function(x){all(x == 0)}))]
@@ -279,7 +285,7 @@ function(input, output, session) {
           # 5.2 Set up edgeR expression object
           DGE_data = DGEList(counts=matrix)
           
-          keep = rowSums(cpm(DGE_data)>min.cpm) >= cpm.Lib_ID.cutoff
+          keep = rowSums(cpm(DGE_data)>min.cpm) >= cpm.Sample_ID.cutoff
           DGE_data = DGE_data[keep, , keep.lib.sizes=FALSE]
           
           # 6
@@ -312,16 +318,16 @@ function(input, output, session) {
         incProgress(1/n, message = "Calculating PCA")
         
         # 7.1 Run PCA
-        pca = prcomp(as.data.frame(t(RV_data$matrix)), scale. = F, center = F)
+        pca = prcomp(as.data.frame(t(RV_data$counts_matrix)), scale. = F, center = F)
         
         # 7.2 Format coordinates (only need )
         coords = as.data.frame(pca$x)
         coords = coords[, 1:10]
         RV_UI$pc_choices = colnames(coords)
-        coords$Lib_ID = row.names(coords)
+        coords$Sample_ID = row.names(coords)
         
         # 7.3 Save PCA coordinates to reactive value
-        RV_data$table = merge(RV_data$table, coords, by = "Lib_ID")
+        RV_data$metadata = merge(RV_data$metadata, coords, by = "Sample_ID")
         
         # 8
         incProgress(1/n, message = "Creating heatmap")
@@ -332,19 +338,33 @@ function(input, output, session) {
     }
   })
   
+  # Heatmap calcultions could be done separately because it might take a while to
+  observeEvent(input$heatmap_button, {
+    if (nrow(RV_fc_table$subset_table) > 2) {
+      gene_list = RV_fc_table$subset_table$gene
+      full_matrix = RV_data$counts_matrix
+      full_matrix$gene = rownames(full_matrix)
+      
+      subset_matrix = subset(full_matrix, gene %in% gene_list)
+      subset_matrix$gene = NULL
+      
+      RV_heatmap$matrix = as.matrix(subset_matrix)
+    }
+  })
+  
   ##########################################################################################################################
   # DYNAMIC DATA UPDATES
   ##########################################################################################################################
   
   # Activated by gene list entry: Update reactive values
   observeEvent(input$gene, ignoreNULL = F, {
-    return_frame = data.frame("Lib_ID"=character())
+    return_frame = data.frame("Sample_ID"=character())
     if (!is.null(input$gene)) {
       for (i in 1:length(input$gene)) {
-        current_row = RV_data$matrix[input$gene[[i]], ]
+        current_row = RV_data$counts_matrix[input$gene[[i]], ]
         transposed_gene = data.frame(t(current_row))
-        transposed_gene$Lib_ID = row.names(transposed_gene)
-        return_frame = merge(return_frame, transposed_gene, by = "Lib_ID", all = T)
+        transposed_gene$Sample_ID = row.names(transposed_gene)
+        return_frame = merge(return_frame, transposed_gene, by = "Sample_ID", all = T)
       }
     }
     
@@ -413,6 +433,7 @@ function(input, output, session) {
     if (length(RV_fc_table$selector) == 1) {
       index = match(RV_fc_table$selector[[1]], RV_UI$fc_names)
       return_table = RV_fc_table$table_list[[index]]
+      return_table = return_table[order(-return_table$logFC), ]
     }
     else if (length(RV_fc_table$selector) == 2) {
       index_1 = match(RV_fc_table$selector[[1]], RV_UI$fc_names)
@@ -461,6 +482,7 @@ function(input, output, session) {
       colnames(table_2)[colnames(table_2) == "gene_2"] = "gene"
       
       return_table = merge(table_1, table_2, by = "gene")
+      return_table = return_table[order(-return_table$logFC_1), ]
     }
     
     RV_fc_table$table = return_table
@@ -479,7 +501,7 @@ function(input, output, session) {
   ##########################################################################################################################
   
   # All possible reactives for generating plots are stored here
-  observeEvent(c(RV_data$table,
+  observeEvent(c(RV_data$metadata,
                  RV_data$selected_genes,
                  RV_data$DGE_matrix,
                  RV_pca_plot$clicks,
@@ -498,7 +520,7 @@ function(input, output, session) {
   
   # Create/update pca plot
   observeEvent(RV_dynamic$val, {
-    if (nrow(RV_data$table) > 0) {
+    if (nrow(RV_data$metadata) > 0) {
       
       plot = NULL
       
@@ -508,7 +530,7 @@ function(input, output, session) {
         plot = ggplot() + xlab("PC.X") + ylab("PC.Y") + geom_text(aes(x=0, y=0, label="Two principal components must be selected in order to plot."), size = 8, colour = plot_text_color)
       } else {
         # Set parameters for graph
-        plot_data = RV_data$table
+        plot_data = RV_data$metadata
         gene_data = RV_data$selected_genes
         P1_name = input$pcs_chosen[[1]]
         P2_name = input$pcs_chosen[[2]]
@@ -527,10 +549,10 @@ function(input, output, session) {
   
   # Create/update mds plot
   observeEvent(RV_dynamic$val, {
-    if (nrow(RV_data$table) > 0) {
+    if (nrow(RV_data$metadata) > 0) {
       
       # Set parameters for graph
-      plot_data = RV_data$table
+      plot_data = RV_data$metadata
       gene_data = RV_data$selected_genes
       plot = NULL
       
@@ -574,14 +596,14 @@ function(input, output, session) {
           }
           else {
             # All conditions passed
-            current_data = data.frame("Lib_ID"=colnames(pseudo_genes), "count"=pseudo_genes[gene_name, ])
-            plot_data = merge(current_data, RV_data$table, by = "Lib_ID")
+            current_data = data.frame("Sample_ID"=colnames(pseudo_genes), "count"=pseudo_genes[gene_name, ])
+            plot_data = merge(current_data, RV_data$metadata, by = "Sample_ID")
             plot_data = findConditionCol(plot_data, input$condition, RV_data$selected_genes)
             
             box_plot = ggplot(plot_data, aes(x=factor(plot_cond_1), y = log(count), fill = factor(plot_cond_1))) +
               geom_boxplot(colour = plot_text_color, width = 0.5) +
               # geom_jitter(aes(fill = factor(plot_cond_1)), size = 4, shape = 21, colour = plot_text_color) +
-              geom_point(aes(fill = factor(plot_cond_1)), size = 4, shape = 21, colour = plot_text_color) +
+              geom_point(aes(fill = factor(plot_cond_1)), size = dot_size, shape = 21, alpha = dot_alpha, colour = plot_text_color) +
               ggtitle(gene_name) +
               scale_fill_manual(values = cbPalette) +
               xlab("Group") +
@@ -716,7 +738,7 @@ function(input, output, session) {
   observeEvent(RV_UI$label_names, {
     updateSelectizeInput(session, inputId = "label_type",
                          choices = c(RV_UI$label_names, "None"),
-                         selected = "Lib_ID")
+                         selected = "Sample_ID")
     
   })
   
@@ -745,6 +767,8 @@ function(input, output, session) {
   
   # Update fold change table options
   observeEvent(RV_UI$fc_names, {
+    print("FC FRAMES UPDATED TO:")
+    print(RV_UI$fc_names)
     updateSelectizeInput(session, inputId = "fc_table_select",
                          choices = RV_UI$fc_names,
                          server = TRUE,
@@ -761,10 +785,10 @@ function(input, output, session) {
     pval_label_2 = NULL
     
     if (length(RV_fc_table$selector) == 2) {
-      fc_label_1 = "Dataset 1"
-      fc_label_2 = "Dataset 2"
-      pval_label_1 = "Dataset 1"
-      pval_label_2 = "Dataset 2"
+      fc_label_1 = "Table 1"
+      fc_label_2 = "Table 2"
+      pval_label_1 = "Table 1"
+      pval_label_2 = "Table 2"
     }
     
     updateSliderInput(session,
@@ -840,6 +864,22 @@ function(input, output, session) {
     datatable(RV_fc_table$display_table, rownames = F, options = list(searching = T, lengthChange = F, pageLength = 50, searchHighlight = T))
   })
   
+  output$heatmap = renderPlotly({
+    heatmaply(log(RV_heatmap$matrix+1))
+              #Rowv = F,
+              #Colv = F,
+              #label_names = c("gene", "sample", "exp"),
+              #xlab = "sample",
+              #ylab = "gene",
+              #showticklabels = T,
+              #fontsize_row = 4,
+              #fontsize_col = 4,
+              #key.title = "Exp",
+              #margins = c(100,100,100,100))
+  })
+  
+  
+  
   # Download Button
   output$downloadData = downloadHandler(
     filename = function() {
@@ -904,7 +944,7 @@ function(input, output, session) {
   
   # Conditional panel for main panel
   output$plot_display = reactive({
-    nrow(RV_data$table) > 0
+    nrow(RV_data$metadata) > 0
   })
   outputOptions(output, "plot_display", suspendWhenHidden = FALSE)
   
@@ -925,6 +965,13 @@ function(input, output, session) {
     ncol(RV_data$selected_genes) == 2 & (input$plot_tab == "MDS Scatter Plot" | input$plot_tab == "PCA Scatter Plot")
   })
   outputOptions(output, "binary_possible", suspendWhenHidden = FALSE)
+  
+  # Condition panel for fold change data
+  output$fc_tables_yes = reactive({
+    length(RV_UI$fc_names) == 0
+  })
+  outputOptions(output, "fc_tables_yes", suspendWhenHidden = FALSE)
+  
   
   # Condition panel for fold change side bar
   output$fc_check = reactive({
@@ -962,7 +1009,7 @@ function(input, output, session) {
   })
   outputOptions(output, "multi_fold_data", suspendWhenHidden = FALSE)
   
-  # Instructional conditions
+  # Instruction conditionals
   output$genes_yes = reactive({
     length(RV_data$selected_genes) > 1
   })
@@ -972,6 +1019,11 @@ function(input, output, session) {
     length(RV_data$selected_genes) <= 1
   })
   outputOptions(output, "genes_no", suspendWhenHidden = FALSE)
+  
+  output$heatmap_yes = reactive({
+    nrow(RV_heatmap$matrix) > 2
+  })
+  outputOptions(output, "heatmap_yes", suspendWhenHidden = FALSE)
   
   session$onSessionEnded(stopApp)
 }

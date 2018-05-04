@@ -12,6 +12,11 @@ library(colorRamps)
 library(DT)
 library(magrittr)
 library(htmlwidgets)
+library(heatmaply)
+library(shinyHeatmaply)
+
+# Weird error message is corrected with this line
+options(repos = BiocInstaller::biocinstallRepos())
 
 theme_set(theme_bw(15))
 plot_text_color = "#2b3e50"
@@ -22,7 +27,7 @@ theme_orange = "#ffb62f"
 cbPalette = c(theme_orange, "#56B4E9", "#66FF66", "#f63093", "#0000ff", "#ff0000", "#CC79A7", "#D55E00", "#009E73", "#33FFFF", "#FF3399", "#F0E442", "#FF3333", "#66FFCC", "#0000CC", "#999999", primary.colors(), blue2green2red(50), magenta2green(50))
 shapes = c(16,15,17,18,6,3,4,8,10,7,9,13,12,1,0,2,5,97:122,65:90,1:25,97:122,65:90)
 dot_size = 5
-dot_alpha = 0.6
+dot_alpha = 0.7
 
 # Functions
 # addLabel takes a plot, the data frame that was used to make the plot, clicked coordinates, and a label and creates a new plot with the
@@ -97,13 +102,13 @@ addLabel = function(p, df, clicks, label, sm, ratio, x_name, y_name) {
     return_plot = return_plot + geom_text(data = selected_row, aes(x=X_plot_coordinate + h_just, y=Y_plot_coordinate + v_just, label = new_label), colour = plot_text_color, size=7, hjust = quad)
     
     if (sm == "s") {
-      return_plot = return_plot + geom_point(data = selected_row, aes(x=X_plot_coordinate, y=Y_plot_coordinate), colour = plot_text_color, alpha = 1, size = 7, shape = 1)
+      return_plot = return_plot + geom_point(data = selected_row, aes(x=X_plot_coordinate, y=Y_plot_coordinate), colour = plot_text_color, alpha = 0.5, size = 8, shape = 16)
     }
     else if (sm == "m") {
       new_data = subset(all_coords, new_label == selected_row$new_label)
       new_data$h_just = h_just
       new_data$v_just = v_just
-      return_plot = return_plot + geom_point(data = new_data, aes(x=X_plot_coordinate, y=Y_plot_coordinate), colour = plot_text_color, alpha = 1, size = 7, shape = 1)
+      return_plot = return_plot + geom_point(data = new_data, aes(x=X_plot_coordinate, y=Y_plot_coordinate), colour = plot_text_color, alpha = 0.5, size = 8, shape = 16)
     }
   }
   
@@ -138,37 +143,26 @@ tableLabel = function(p, df, highlight_rows, label, ratio) {
 }
 # findConditionCol takes a dataframe and a string, and changes the name of the column that matches the string to 'current_plot_group'
 findConditionCol = function(df, c, genes) {
-  if (!is.null(c)) {
-    # If any genes are selected
-    if (length(genes) > 1) {
-      if (c[1] == "Lib_ID") {
-        plot_cond_1
-        df$plot_cond_1 = df$Lib_ID
-      }
-      else {
-        names(df)[names(df) == c[1]] = "plot_cond_1"
-      }
+  if (is.null(c)) {
+    df$plot_cond_1 = "x"
+  } else if (length(c) > 0) {
+    if (c[1] == "Sample_ID") {
+      df$plot_cond_1 = df$Sample_ID
     }
-    # If no genes are selected
     else {
-      # If one condition is selected
-      if (c[1] == "Lib_ID") {
-        df$plot_cond_1 = df$Lib_ID
+      df$plot_cond_1 = df[, c[1]]
+    }
+  } else if (length(c) > 1) {
+    if (length(c) == 2) {
+      if (c[2] == "Sample_ID") {
+        df$plot_cond_2 = df$Sample_ID
       }
       else {
-        names(df)[names(df) == c[1]] = "plot_cond_1"
-      }
-      # If two conditions are selected
-      if (length(c) == 2) {
-        if (c[2] == "Lib_ID") {
-          df$plot_cond_2 = df$Lib_ID
-        }
-        else {
-          names(df)[names(df) == c[2]] = "plot_cond_2"
-        }
+        df$plot_cond_2 = df[, c[2]]
       }
     }
   }
+  
   return(df)
 }
 # Convert gene names to 'Master' name set, if non-mouse data exists in analysis
@@ -195,33 +189,22 @@ graphGenes = function(df, gd, x_name, y_name, plot_name, b, b_thresh) {
   # No genes are present
   if (ncol(gene_data) == 1) {
     
-    if (any(grepl("plot_cond_1", colnames(plot_data)))) {
-      if (any(grepl("plot_cond_2", colnames(plot_data)))) {
-        plot = ggplot(plot_data, aes(x = X_plot_coordinate, y = Y_plot_coordinate, colour = factor(plot_cond_1), shape = factor(plot_cond_2))) +
-          ggtitle(plot_name) +
-          xlab(x_name) +
-          ylab(y_name) +
-          geom_point(size = dot_size, alpha = dot_alpha) +
-          scale_colour_manual(values=cbPalette) +
-          scale_shape_manual(values = shapes)
-        
-      } else {
-        plot = ggplot(plot_data, aes(x = X_plot_coordinate, y = Y_plot_coordinate, colour = factor(plot_cond_1))) +
-          ggtitle(plot_name) +
-          xlab(x_name) +
-          ylab(y_name) +
-          geom_point(size = dot_size, alpha = dot_alpha) +
-          scale_colour_manual(values=cbPalette)
-      }
-      
-    } else {
-      plot = ggplot(plot_data, aes(x = X_plot_coordinate, y = Y_plot_coordinate)) +
+    if (any(grepl("plot_cond_2", colnames(plot_data)))) {
+      plot = ggplot(plot_data, aes(x = X_plot_coordinate, y = Y_plot_coordinate, colour = factor(plot_cond_1), shape = factor(plot_cond_2))) +
         ggtitle(plot_name) +
         xlab(x_name) +
         ylab(y_name) +
-        geom_point(colour = "grey", size = dot_size, alpha = dot_alpha) +
+        geom_point(size = dot_size, alpha = dot_alpha) +
         scale_colour_manual(values=cbPalette) +
         scale_shape_manual(values = shapes)
+      
+    } else {
+      plot = ggplot(plot_data, aes(x = X_plot_coordinate, y = Y_plot_coordinate, colour = factor(plot_cond_1))) +
+        ggtitle(plot_name) +
+        xlab(x_name) +
+        ylab(y_name) +
+        geom_point(size = dot_size, alpha = dot_alpha) +
+        scale_colour_manual(values=cbPalette)
     }
   }
   
@@ -231,8 +214,8 @@ graphGenes = function(df, gd, x_name, y_name, plot_name, b, b_thresh) {
     if (b == "On") {
       
       gene_name = colnames(gene_data[2])
-      colnames(gene_data) = c("Lib_ID", "Exp")
-      plot_data = merge(plot_data, gene_data, by = "Lib_ID", all.x = T)
+      colnames(gene_data) = c("Sample_ID", "Exp")
+      plot_data = merge(plot_data, gene_data, by = "Sample_ID", all.x = T)
       
       threshold = b_thresh
       
@@ -253,8 +236,8 @@ graphGenes = function(df, gd, x_name, y_name, plot_name, b, b_thresh) {
     } else {
       
       gene_name = colnames(gene_data[2])
-      colnames(gene_data) = c("Lib_ID", "Exp")
-      plot_data = merge(plot_data, gene_data, by = "Lib_ID", all.x = T)
+      colnames(gene_data) = c("Sample_ID", "Exp")
+      plot_data = merge(plot_data, gene_data, by = "Sample_ID", all.x = T)
       
       current_max = max(plot_data$Exp)
       current_min = min(plot_data$Exp)
@@ -280,8 +263,8 @@ graphGenes = function(df, gd, x_name, y_name, plot_name, b, b_thresh) {
     
     gene_name_1 = colnames(gene_data[2])
     gene_name_2 = colnames(gene_data[3])
-    colnames(gene_data) = c("Lib_ID", "Exp1", "Exp2")
-    plot_data = merge(plot_data, gene_data, by = "Lib_ID", all.x = T)
+    colnames(gene_data) = c("Sample_ID", "Exp1", "Exp2")
+    plot_data = merge(plot_data, gene_data, by = "Sample_ID", all.x = T)
     
     threshold = b_thresh
     
